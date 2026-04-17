@@ -1,9 +1,6 @@
 # ============================================================
-# PROJECT SETUP — Run this ONCE in RStudio Console
-# Creates the full folder structure for the project
+# PROJECT SETUP —
 # ============================================================
-# Copy-paste this block into your RStudio Console (not a script)
-# Run it from inside your project folder
 
 # 1. Create all folders
 dir.create("scripts",           showWarnings = FALSE)
