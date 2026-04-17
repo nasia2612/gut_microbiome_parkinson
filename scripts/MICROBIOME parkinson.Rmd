@@ -123,3 +123,85 @@ ggsave("read_depth_both.png", plot = merged, width = 12, height = 5)
 
 
 ```
+
+
+
+```{r setup ,cache=TRUE}
+#Quantify the sparsity of the OTU table. so we need to convert the otu table to R expects matrix or #dataframe
+otu1<-as(otu_table(Dataset1),"matrix")
+
+otu2<-as(otu_table(Dataset2),"matrix")
+
+zerosotu1<-sum(otu1==0)/length(otu1)
+
+zerosotu2<-sum(otu2==0)/length(otu2)
+
+#so 98.5% of Dataset 1's OTU table is zeros and 97.9% of Dataset 2's OTU table is zeros
+
+
+#persample sparsity 
+sample_sparsity_1<-colMeans(otu1==0) #colmean returns 0,1
+sample_sparsity_2<-colMeans(otu2==0)
+cat("\nDataset 1 - median fraction of ASVs absent per sample:",
+    round(median(sample_sparsity_1), 3), "\n")
+cat("Dataset 2 - median fraction of ASVs absent per sample:",
+    round(median(sample_sparsity_2), 3), "\n")
+```
+
+
+
+we do not have enought metadata (for example age,sex,geographic location )
+so will import the metadata from the original study and we will merge them based on the sample ID
+
+```{r summary of phyloseq objects}
+rank_names(Dataset1)     
+sample_variables(Dataset1)
+
+sra_meta<-read.csv("C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",check.names=FALSE,stringsAsFactor=FALSE)
+cat("SRA metadata dimensions:", dim(sra_meta), "\n")
+cat("Columns available:\n")
+print(colnames(sra_meta))
+
+
+```
+
+
+```{r, explore the new metadata and merge}
+#read csv
+sra_meta<-read.csv("C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",check.names=FALSE,stringsAsFactor=FALSE)
+cat("SRA metadata dimensions:", dim(sra_meta), "\n")
+cat("Columns available:\n")
+#print(colnames(sra_meta))
+
+      
+#split sra by dataset
+sra_ds1<-sra_meta[sra_meta$Dataset=="dataset_1",]
+sra_ds2<-sra_meta[sra_meta$Dataset=="dataset_2",]
+
+
+
+
+#align and merge
+#for dataset1 
+idx1<-match(sample_names(Dataset1),sra_ds1$'Library Name') #find for each sample in phyloseq what row is in csv
+
+meta1<-sra_ds1[idx1,]
+
+rownames(meta1)<-sample_names(Dataset1)
+sample_data(Dataset1)<-sample_data(meta1)
+
+#for dataset2
+idx2 <- match(sample_names(Dataset2), sra_ds2$`Library Name`)
+meta2 <- sra_ds2[idx2, ]
+rownames(meta2) <- sample_names(Dataset2)
+sample_data(Dataset2) <- sample_data(meta2)
+
+
+table(sample_data(Dataset1)$geographic_location)
+table(sample_data(Dataset2)$geographic_location)
+
+
+```
+
+
+
