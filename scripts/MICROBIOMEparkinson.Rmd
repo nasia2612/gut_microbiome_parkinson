@@ -1,0 +1,504 @@
+---
+title: "GUT MICROBIOME ML PROJECT parkinson"
+output: html_document
+date: "2026-04-12"
+---
+
+otu_table()Count matrixHow many of each bacteria per sample
+
+sample_data()MetadataInfo ABOUT each patient
+
+tax_table()TaxonomyWhat each bacteria is called
+
+phy_tree()TreeEvolutionary relationships
+
+```{r setup}
+
+
+
+
+# ---- Libraries ----
+library(phyloseq)
+
+data_dir <- "Wallen_DAMethodCompare_2021/PhyloseqObjects"
+
+# ---- Load phyloseq objects ----
+library(here)
+Dataset1 <- readRDS(here("data", "Dataset1", "phyloseq.rds"))
+Dataset2 <- readRDS(here("data", "Dataset2", "phyloseq.rds"))
+
+
+cat("Dataset1:", nsamples(Dataset1), "samples,", ntaxa(Dataset1), "taxa\n")
+cat("Dataset2:", nsamples(Dataset2), "samples,", ntaxa(Dataset2), "taxa\n")
+```
+
+
+
+```{r setup,cache=TRUE}
+# Step 1: Explore 
+#FOR SAMPLE_DATA
+
+
+table(sample_data(Dataset1)$case_control)
+
+colnames(sample_data(Dataset1))
+
+head(sample_data(Dataset1))
+
+
+```
+Sample Data:        [6 samples by 3 sample variables]:
+                NGRC_SampleID        SampleID case_control
+10122.EC0013201     EC0013201 10122.EC0013201      Control
+10122.EC0037201     EC0037201 10122.EC0037201      Control
+10122.EC0044201     EC0044201 10122.EC0044201      Control
+10122.EC0046201     EC0046201 10122.EC0046201      Control
+10122.EC0051201     EC0051201 10122.EC0051201      Control
+```{r,finding NAs}
+
+colSums(is.na(meta1))
+colSums(is.na(meta2))
+
+
+```
+
+```{r setup,cache=TRUE}
+#EXPLORE FOR OTU TABLE
+otu_table(Dataset1)[1:5, 1:5]
+
+# Total reads per sample
+head(colSums(otu_table(Dataset1)))
+
+# Total reads per taxon
+head(rowSums(otu_table(Dataset1)))
+
+# Dimensions
+dim(otu_table(Dataset1))
+
+```
+
+
+```{r setup,cache=TRUE}
+#EXPLORE
+
+head(tax_table(Dataset1))
+
+
+```
+
+
+
+```{r setup,cache=TRUE}
+
+library(ggplot2)
+
+
+reads_df_1<-data.frame(
+  reads=sample_sums(Dataset1),
+  group=sample_data(Dataset1)$case_control
+)
+
+p1<-ggplot(reads_df_1, aes(x = reads, fill = group)) +
+  geom_histogram(bins = 30, alpha = 0.7, color = "white") +
+  scale_fill_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "Read Depth per Sample",
+       x = "Total Reads", y = "Number of Samples", fill = "Group")
+
+print(p1)
+
+
+#FOR DATASET 2 
+
+
+
+reads_df_2<-data.frame(
+  reads=sample_sums(Dataset2),
+  group=sample_data(Dataset2)$case_control
+)
+
+p2<-ggplot(reads_df_2, aes(x = reads, fill = group)) +
+  geom_histogram(bins = 30, alpha = 0.7, color = "white") +
+  scale_fill_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "Read Depth per Sample",
+       x = "Total Reads", y = "Number of Samples", fill = "Group")
+
+#side by side
+library(gridExtra)
+merged<-grid.arrange(p1,p2,ncol=2)
+
+print(merged)
+
+ggsave("read_depth_both.png", plot = merged, width = 12, height = 5)
+
+
+
+
+
+```
+
+
+
+```{r setup ,cache=TRUE}
+#Quantify the sparsity of the OTU table. so we need to convert the otu table to R expects matrix or #dataframe
+otu1<-as(otu_table(Dataset1),"matrix")
+
+otu2<-as(otu_table(Dataset2),"matrix")
+
+zerosotu1<-sum(otu1==0)/length(otu1)
+
+zerosotu2<-sum(otu2==0)/length(otu2)
+
+#so 98.5% of Dataset 1's OTU table is zeros and 97.9% of Dataset 2's OTU table is zeros
+
+
+#persample sparsity 
+sample_sparsity_1<-colMeans(otu1==0) #colmean returns 0,1
+sample_sparsity_2<-colMeans(otu2==0)
+cat("\nDataset 1 - median fraction of ASVs absent per sample:",
+    round(median(sample_sparsity_1), 3), "\n")
+cat("Dataset 2 - median fraction of ASVs absent per sample:",
+    round(median(sample_sparsity_2), 3), "\n")
+```
+
+
+
+we do not have enought metadata (for example age,sex,geographic location )
+so will import the metadata from the original study and we will merge them based on the sample ID
+
+```{r summary of phyloseq objects}
+rank_names(Dataset1)     
+sample_variables(Dataset1)
+
+sra_meta<-read.csv("C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",check.names=FALSE,stringsAsFactor=FALSE)
+cat("SRA metadata dimensions:", dim(sra_meta), "\n")
+cat("Columns available:\n")
+print(colnames(sra_meta))
+
+
+```
+
+
+```{r, explore the new metadata and merge}
+#read csv
+sra_meta<-read.csv("C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",check.names=FALSE,stringsAsFactor=FALSE)
+cat("SRA metadata dimensions:", dim(sra_meta), "\n")
+cat("Columns available:\n")
+#print(colnames(sra_meta))
+
+      
+#split sra by dataset
+sra_ds1<-sra_meta[sra_meta$Dataset=="dataset_1",]
+sra_ds2<-sra_meta[sra_meta$Dataset=="dataset_2",]
+
+
+#align and merge
+#for dataset1 
+idx1<-match(sample_names(Dataset1),sra_ds1$'Library Name') #find for each sample in phyloseq what row is in csv
+
+meta1<-sra_ds1[idx1,]
+
+rownames(meta1)<-sample_names(Dataset1)
+sample_data(Dataset1)<-sample_data(meta1)
+
+#for dataset2
+idx2 <- match(sample_names(Dataset2), sra_ds2$`Library Name`)
+meta2 <- sra_ds2[idx2, ]
+rownames(meta2) <- sample_names(Dataset2)
+sample_data(Dataset2) <- sample_data(meta2)
+
+
+table(sample_data(Dataset1)$geographic_location)
+table(sample_data(Dataset2)$geographic_location)
+
+
+```
+```{r,NORMALISATION}
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install("microbiome")
+
+library(microbiome)
+library(phyloseq)
+library(ggplot2)
+
+#CLR TRANFORMATION USING THE MICROBIOME LIBRARY
+Dataset1_clr<-microbiome::transform(Dataset1,"clr")
+Dataset2_clr<-microbiome::transform(Dataset2,"clr")
+
+
+
+
+
+```
+
+```{r}
+
+dim(otu_table(Dataset1))
+
+
+```
+
+
+```{r}
+
+print(otu_table(Dataset1))
+
+```
+
+
+
+```{r, prevelance of each taxon}
+#we use the raw counts because its a binary question and in the normalized the zero counts become...not zero
+
+#DATASET 1
+prev_df_1 <- data.frame(
+  Prevalence = colSums(otu_table(Dataset1) > 0) / nsamples(Dataset1),
+  TotalAbundance = taxa_sums(Dataset1),
+  Phylum = tax_table(Dataset1)[, "Phylum"]
+)
+
+
+nrow(prev_df_1)  
+head(prev_df_1) 
+
+#DATASET 2
+prev_df_2<-data.frame(
+  Prevalence=colSums(otu_table(Dataset2)>0)/nsamples(Dataset2),
+  TotalAbundance=taxa_sums(Dataset2),
+  Phylum=tax_table(Dataset2)[,"Phylum"]
+)
+
+
+
+```
+
+
+```{r}
+#prevalence by condition 
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+
+
+############################################# DATASET1################################################################
+# subset
+ds1_case    <- subset_samples(Dataset1, case_control == "Case")
+ds1_control <- subset_samples(Dataset1, case_control == "Control")
+
+# prevalence per group
+prev_case    <- colSums(otu_table(ds1_case) > 0)    / nsamples(ds1_case)
+prev_control <- colSums(otu_table(ds1_control) > 0) / nsamples(ds1_control)
+
+# fix tax_table length mismatch
+phylum_vec <- as.vector(tax_table(Dataset1)[taxa_names(Dataset1), "Phylum"])
+
+# build dataframe
+prev_by_cond <- data.frame(
+  Prev_Case    = as.numeric(prev_case),
+  Prev_Control = as.numeric(prev_control),
+  TotalAbundance = taxa_sums(Dataset1),
+  Phylum       = phylum_vec
+)
+
+# colors
+phyla_3 <- unique(prev_by_cond$Phylum)
+palette_colors_3 <- colorRampPalette(brewer.pal(12, "Paired"))(length(phyla_3))
+names(palette_colors_3) <- phyla_3
+
+# plot Case vs Control prevalence per taxon
+prevalence_plot_by_cond <- ggplot(prev_by_cond, aes(x = Prev_Control, y = Prev_Case, color = Phylum)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_color_manual(values = palette_colors_3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence by Condition — Dataset 1",
+       subtitle = "Red line = equal prevalence in Case and Control",
+       x = "Prevalence in Control",
+       y = "Prevalence in Case")
+
+print(prevalence_plot_by_cond)
+
+
+############################################# DATASET2################################################################
+ds2_case    <- subset_samples(Dataset2, case_control == "Case")
+ds2_control <- subset_samples(Dataset2, case_control == "Control")
+
+# prevalence per group
+prev_case2   <- colSums(otu_table(ds2_case) > 0)    / nsamples(ds2_case)
+prev_control2 <- colSums(otu_table(ds2_control) > 0) / nsamples(ds2_control)
+
+# fix tax_table length mismatch
+phylum_vec2 <- as.vector(tax_table(Dataset2)[taxa_names(Dataset2), "Phylum"])
+
+# build dataframe
+prev_by_cond2 <- data.frame(
+  Prev_Case    = as.numeric(prev_case2),
+  Prev_Control = as.numeric(prev_control2),
+  TotalAbundance = taxa_sums(Dataset2),
+  Phylum      = phylum_vec2
+)
+
+# colors
+phyla_4 <- unique(prev_by_cond2$Phylum)
+palette_colors_4 <- colorRampPalette(brewer.pal(12, "Paired"))(length(phyla_4))
+names(palette_colors_4) <- phyla_4
+
+# plot Case vs Control prevalence per taxon
+prevalence_plot_by_cond2 <- ggplot(prev_by_cond2, aes(x = Prev_Control, y = Prev_Case, color = Phylum)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_color_manual(values = palette_colors_4) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence by Condition — Dataset 2",
+       subtitle = "Red line = equal prevalence in Case and Control",
+       x = "Prevalence in Control",
+       y = "Prevalence in Case")
+
+print(prevalence_plot_by_cond2)
+
+ggsave("plots/prevalence_by_cond_ds1.png", plot = prevalence_plot_by_cond,  width = 8, height = 6)
+ggsave("plots/prevalence_by_cond_ds2.png", plot = prevalence_plot_by_cond2, width = 8, height = 6)
+dir.create("plotsYES", showWarnings = FALSE)
+```
+
+
+```{r,fig.width=14,fig.height=7,making plots for prevelance}
+
+#PLOT THE PREVALENCE
+library(ggplot2)
+
+#get phyla 
+#FOR DATASET 1
+phyla_1<-unique(prev_df_1$Phylum)
+
+print(phyla_1)
+n<-length(phyla_1)
+n
+#i will generate colors for each phyla
+library(RColorBrewer)
+palette_colors_1<-colorRampPalette(brewer.pal(12,"Paired"))(n)
+
+names(palette_colors)<-phyla_1
+
+
+#
+prevalence_plot_1<-ggplot(prev_df_1, aes(x = TotalAbundance, y = Prevalence, color = Phylum)) +  
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_x_log10() +
+  scale_color_manual(values=palette_colors_1)+
+  geom_hline(yintercept = 0.1, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence vs Abundance — Dataset 1",
+       subtitle = "Red line = 10% prevalence threshold",
+       x = "Total Abundance (log10)",
+       y = "Prevalence (fraction of samples)")                                
+
+
+#FOR DATASET 2
+phyla_2<-unique(prev_df_2$Phylum)
+
+k<-length(phyla_2)
+print(k)
+
+palette_colors_2<-colorRampPalette(brewer.pal(12,"Paired"))(k)
+                                   
+prevalence_plot_2<-ggplot(prev_df_2,aes(x = TotalAbundance, y = Prevalence, color = Phylum)) +  
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_x_log10() +
+  scale_color_manual(values=palette_colors_2)+
+  geom_hline(yintercept = 0.1, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence vs Abundance — Dataset 2",
+       subtitle = "Red line = 10% prevalence threshold",
+       x = "Total Abundance (log10)",
+       y = "Prevalence (fraction of samples)")                                
+
+                                   
+print(prevalence_plot_1)
+print(prevalence_plot_2)
+
+
+```
+
+```{r, filtering the rare ones}
+
+
+#filter dataset1 ->keep taxa present in >10% of samples
+
+prevalence_threshold<-0.1
+
+taxa_to_keep_1<-rownames(prev_df_1)[prev_df_1$Prevalence>=prevalence_threshold]
+#prunes =removes taxa
+Dataset1_filtered<-prune_taxa(taxa_to_keep_1,Dataset1)
+
+
+#filter dataset1 
+taxa_to_keep_2 <- rownames(prev_df_2)[prev_df_2$Prevalence >= prevalence_threshold]
+
+Dataset2_filtered<-prune_taxa(taxa_to_keep_2,Dataset2)
+
+
+#plot again 
+#phylum_vec1 <- as.vector(tax_table(Dataset1_filtered)[taxa_names(Dataset1_filtered), "Phylum"])
+#phylum_vec2 <- as.vector(tax_table(Dataset2_filtered)[taxa_names(Dataset2_filtered), "Phylum"])
+# Recompute prevalence dataframes from filtered objects
+prev_df_1_filtered <- data.frame(
+  Prevalence     = colSums(otu_table(Dataset1_filtered) > 0) / nsamples(Dataset1_filtered),
+  TotalAbundance = taxa_sums(Dataset1_filtered),
+  Phylum         = as.vector(tax_table(Dataset1_filtered)[taxa_names(Dataset1_filtered), "Phylum"])
+)
+
+prev_df_2_filtered <- data.frame(
+  Prevalence     = colSums(otu_table(Dataset2_filtered) > 0) / nsamples(Dataset2_filtered),
+  TotalAbundance = taxa_sums(Dataset2_filtered),
+  Phylum         = as.vector(tax_table(Dataset2_filtered)[taxa_names(Dataset2_filtered), "Phylum"])
+)
+
+
+phyla_1 <- unique(prev_df_1_filtered$Phylum)
+palette_colors_1 <- colorRampPalette(brewer.pal(12, "Paired"))(length(phyla_1))
+names(palette_colors_1) <- phyla_1
+
+prevalence_plot_1 <- ggplot(prev_df_1_filtered, aes(x = TotalAbundance, y = Prevalence, color = Phylum)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_x_log10() +
+  scale_color_manual(values = palette_colors_1) +
+  geom_hline(yintercept = 0.1, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence vs Abundance — Dataset 1 (filtered)",
+       x = "Total Abundance (log10)", y = "Prevalence (fraction of samples)")
+
+phyla_2 <- unique(prev_df_2_filtered$Phylum)
+palette_colors_2 <- colorRampPalette(brewer.pal(12, "Paired"))(length(phyla_2))
+names(palette_colors_2) <- phyla_2
+
+prevalence_plot_2 <- ggplot(prev_df_2_filtered, aes(x = TotalAbundance, y = Prevalence, color = Phylum)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_x_log10() +
+  scale_color_manual(values = palette_colors_2) +
+  geom_hline(yintercept = 0.1, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "Prevalence vs Abundance — Dataset 2 (filtered)",
+       x = "Total Abundance (log10)", y = "Prevalence (fraction of samples)")
+
+prevalence_plot_1
+prevalence_plot_2
+
+```
+
+```{r, CLR TRANSFORMATION}
+#CLR(x) = log(x / geometric_mean(x))
+
+
+#extract the OTU TABLE AGAIN as matrix (samples x taxa)
+#as.matrix ->because we need to strip down only to numbers
+Dataset1_clr<-microbiome::transform(Dataset1_filtered,"clr")
+Dataset2_clr<-microbiome::transform(Dataset2_filtered,"clr")
+
+
+
+
+```
