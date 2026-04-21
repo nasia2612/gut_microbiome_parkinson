@@ -214,24 +214,7 @@ table(sample_data(Dataset2)$geographic_location)
 
 
 ```
-```{r,NORMALISATION}
 
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install("microbiome")
-
-library(microbiome)
-library(phyloseq)
-library(ggplot2)
-
-#CLR TRANFORMATION USING THE MICROBIOME LIBRARY
-Dataset1_clr<-microbiome::transform(Dataset1,"clr")
-Dataset2_clr<-microbiome::transform(Dataset2,"clr")
-
-
-
-
-
-```
 
 ```{r}
 
@@ -321,7 +304,9 @@ prevalence_plot_by_cond <- ggplot(prev_by_cond, aes(x = Prev_Control, y = Prev_C
 
 print(prevalence_plot_by_cond)
 
+```
 
+```{r ,prevalence by condition for dataset2}
 ############################################# DATASET2################################################################
 ds2_case    <- subset_samples(Dataset2, case_control == "Case")
 ds2_control <- subset_samples(Dataset2, case_control == "Control")
@@ -381,7 +366,7 @@ n
 library(RColorBrewer)
 palette_colors_1<-colorRampPalette(brewer.pal(12,"Paired"))(n)
 
-names(palette_colors)<-phyla_1
+names(palette_colors_1)<-phyla_1
 
 
 #
@@ -489,16 +474,93 @@ prevalence_plot_2
 
 ```
 
-```{r, CLR TRANSFORMATION}
-#CLR(x) = log(x / geometric_mean(x))
 
+```{r, ALPHA DIVERSITY}
+# calculate alpha diversity on FILTERED datasets
+alpha1 <- estimate_richness(Dataset1_filtered,
+                            measures = c("Observed","Chao1","Shannon","Simpson","InvSimpson","Fisher"))
+alpha2 <- estimate_richness(Dataset2_filtered,
+                            measures = c("Observed","Chao1","Shannon","Simpson","InvSimpson","Fisher"))
 
-#extract the OTU TABLE AGAIN as matrix (samples x taxa)
-#as.matrix ->because we need to strip down only to numbers
-Dataset1_clr<-microbiome::transform(Dataset1_filtered,"clr")
-Dataset2_clr<-microbiome::transform(Dataset2_filtered,"clr")
+# rownames to columns
+alpha1$SampleID <- rownames(alpha1)
+alpha1$Status <- sample_data(Dataset1_filtered)$case_control
+alpha2$SampleID <- rownames(alpha2)
+alpha2$Status <- sample_data(Dataset2_filtered)$case_control
+
+library(ggplot2)
+library(tidyr)
+
+# combine both datasets for plotting
+alpha1$Dataset <- "Dataset1"
+alpha2$Dataset <- "Dataset2"
+alpha_combined <- rbind(alpha1, alpha2)
+
+# reshape to long format for faceting
+alpha_long <- pivot_longer(alpha_combined,
+                           cols = c("Observed","Shannon","Simpson"),
+                           names_to = "Metric",
+                           values_to = "Value")
+
+# plot
+ggplot(alpha_long, aes(x = Status, y = Value, fill = Status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 0.8, alpha = 0.5) +
+  facet_wrap(~ Metric + Dataset, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Alpha Diversity: PD vs Control")
+#geom_jitter ->is like for the dots inside ,the outliers is outside and we dont want them so we put outliers.shape=NA
+ #facet_wraps ->merged them ,splits by metric ,with scales to free_y because every metric has its own y axis 
+                      
 
 
 
 
 ```
+```{r,testing for differences in alpha diversity }
+library(dplyr)
+
+#For each Dataset + Metric combination, calculate the median for Cases, the median for #Controls, and the Wilcoxon p value comparing them."
+#wilcox ->difference in medians
+alpha_stas<-alpha_long %>%
+  group_by(Dataset,Metric)%>%
+  summarise(
+    Case_median=median(Value[Status=="Case"],na.rm=TRUE),
+    Control_median=median(Value[Status=="Control"],na.rm=TRUE),
+    p_value=wilcox.test(Value[Status == "Case"], 
+                                 Value[Status == "Control"])$p.value,
+    .groups = "drop"
+  )
+  
+#apply benjamini-honchberg FDR for multiple correction across al test
+
+alpha_stas$p_adjusted<-p.adjust(alpha_stas$p_value,method="BH")
+
+
+print(alpha_stas)
+
+
+
+```
+Alpha diversity shows no significant differences between PD and Control after FDR correction in either dataset, suggesting PD-associated microbiome changes are compositional rather than diversity-based — motivating beta diversity and differential abundance analysis.
+
+
+
+
+```{r, CLR TRANSFORMATION}
+#CLR(x) = log(x / geometric_mean(x))
+
+#after a-diversity metrics 
+#extract the OTU TABLE AGAIN as matrix (samples x taxa)
+#as.matrix ->because we need to strip down only to numbers
+Dataset1_clr<-microbiome::transform(Dataset1_filtered,"clr")
+
+Dataset2_clr<-microbiome::transform(Dataset2_filtered,"clr")
+
+
+
+```
+
+
+
+
