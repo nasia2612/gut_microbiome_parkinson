@@ -1,6 +1,8 @@
 ---
 title: "GUT MICROBIOME ML PROJECT parkinson"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 date: "2026-04-12"
 ---
 
@@ -56,8 +58,8 @@ Sample Data:        [6 samples by 3 sample variables]:
 10122.EC0051201     EC0051201 10122.EC0051201      Control
 ```{r,finding NAs}
 
-colSums(is.na(meta1))
-colSums(is.na(meta2))
+#colSums(is.na(meta1))
+#colSums(is.na(meta2))
 
 
 ```
@@ -179,41 +181,53 @@ print(colnames(sra_meta))
 
 ```
 
-
-```{r, explore the new metadata and merge}
-#read csv
-sra_meta<-read.csv("C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",check.names=FALSE,stringsAsFactor=FALSE)
+```{r explore the new metadata and merge}
+# read csv
+sra_meta <- read.csv(
+  "C:\\Users\\Νάσια\\Desktop\\volos summer school\\gut_microbiome_parkinson\\data\\SraRunTable.csv",
+  check.names = FALSE, stringsAsFactors = FALSE
+)
 cat("SRA metadata dimensions:", dim(sra_meta), "\n")
-cat("Columns available:\n")
-#print(colnames(sra_meta))
 
-      
-#split sra by dataset
-sra_ds1<-sra_meta[sra_meta$Dataset=="dataset_1",]
-sra_ds2<-sra_meta[sra_meta$Dataset=="dataset_2",]
+# split sra by dataset
+sra_ds1 <- sra_meta[sra_meta$Dataset == "dataset_1", ]
+sra_ds2 <- sra_meta[sra_meta$Dataset == "dataset_2", ]
 
+# align and merge
+# for dataset1
+idx1 <- match(sample_names(Dataset1), sra_ds1$`Library Name`)
+meta1 <- sra_ds1[idx1, ]
+rownames(meta1) <- sample_names(Dataset1)
+sample_data(Dataset1) <- sample_data(meta1)
 
-#align and merge
-#for dataset1 
-idx1<-match(sample_names(Dataset1),sra_ds1$'Library Name') #find for each sample in phyloseq what row is in csv
-
-meta1<-sra_ds1[idx1,]
-
-rownames(meta1)<-sample_names(Dataset1)
-sample_data(Dataset1)<-sample_data(meta1)
-
-#for dataset2
+# for dataset2
 idx2 <- match(sample_names(Dataset2), sra_ds2$`Library Name`)
 meta2 <- sra_ds2[idx2, ]
 rownames(meta2) <- sample_names(Dataset2)
 sample_data(Dataset2) <- sample_data(meta2)
 
+# ---- NEW: derive case_control from health_state ----
+# SRA calls it "health_state" with values "Parkinsons"/"Control"
+# Standardize to "case_control" with values "Case"/"Control"
+sample_data(Dataset1)$case_control <- ifelse(
+  sample_data(Dataset1)$health_state == "Parkinsons", "Case", "Control"
+)
+sample_data(Dataset2)$case_control <- ifelse(
+  sample_data(Dataset2)$health_state == "Parkinsons", "Case", "Control"
+)
 
-table(sample_data(Dataset1)$geographic_location)
-table(sample_data(Dataset2)$geographic_location)
+# ---- VERIFY both variables exist and look right ----
+cat("\n--- Dataset 1 ---\n")
+print(table(sample_data(Dataset1)$case_control))
+print(table(sample_data(Dataset1)$geographic_location))
 
-
+cat("\n--- Dataset 2 ---\n")
+print(table(sample_data(Dataset2)$case_control))
+print(table(sample_data(Dataset2)$geographic_location))
 ```
+
+
+
 
 
 ```{r}
@@ -413,7 +427,7 @@ print(prevalence_plot_2)
 
 #filter dataset1 ->keep taxa present in >10% of samples
 
-prevalence_threshold<-0.1
+prevalence_threshold<-0.05
 
 taxa_to_keep_1<-rownames(prev_df_1)[prev_df_1$Prevalence>=prevalence_threshold]
 #prunes =removes taxa
@@ -542,17 +556,17 @@ print(alpha_stas)
 
 
 ```
-Alpha diversity shows no significant differences between PD and Control after FDR correction in either dataset, suggesting PD-associated microbiome changes are compositional rather than diversity-based — motivating beta diversity and differential abundance analysis.
+Alpha diversity shows no significant differences between PD and Control after FDR correction in either dataset, suggesting PD-associated microbiome changes are compositional rather than diversity-based, motivating beta diversity and differential abundance analysis.
 
 
 
 
-```{r, CLR TRANSFORMATION}
+```{r, CLR,aitchison,transform it to regular euclidean space where standard statistics actually work TRANSFORMATION}
 #CLR(x) = log(x / geometric_mean(x))
 
 #after a-diversity metrics 
 #extract the OTU TABLE AGAIN as matrix (samples x taxa)
-#as.matrix ->because we need to strip down only to numbers
+
 Dataset1_clr<-microbiome::transform(Dataset1_filtered,"clr")
 
 Dataset2_clr<-microbiome::transform(Dataset2_filtered,"clr")
@@ -560,6 +574,245 @@ Dataset2_clr<-microbiome::transform(Dataset2_filtered,"clr")
 
 
 ```
+
+
+
+
+```{r, beta diversity,pcoa}
+library(phyloseq)
+library(ggplot2)
+#bray curtis 
+#it needs relative abundance not clr 
+
+Dataset_1_rel<-transform_sample_counts(Dataset1_filtered,function(x) x/sum(x))
+Dataset_2_rel<-transform_sample_counts(Dataset2_filtered,function(x) x/sum(x))
+
+#relative abundance ->each sample must sum to 1
+range(sample_sums(Dataset_1_rel))#range it returns the min and the max 
+range(sample_sums(Dataset_2_rel))
+
+#bray-curtis distance +pcoa 
+
+ord1<-ordinate(Dataset_1_rel,method="PCoA",distance="bray")
+ord2<-ordinate(Dataset_2_rel,method="PCoA",distance="bray")
+
+#variance explained by each axis
+vars_ds1<-round(ord1$values$Relative_eig[1:2]*100,1)
+vars_ds2<-round(ord2$values$Relative_eig[1:2]*100,1)
+cat("Dataset 1 — Axis1:", vars_ds1[1], "%, Axis2:", vars_ds1[2], "%\n")
+cat("Dataset 2 — Axis1:", vars_ds2[1], "%, Axis2:", vars_ds2[2], "%\n")
+#stat_ellipse=>It takes each color group (Case and Control) separately.
+#For each group it fits a bivariate normal distribution to their (PCoA1, PCoA2) coordinates.
+#It draws the 95% confidence ellipse — the region that should contain ~95% of points if the group were truly bivariate normal.
+
+# ---- 4. Plot PCoA ----
+p_beta1 <- plot_ordination(Dataset_1_rel, ord1, color = "case_control") +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "PCoA (Bray-Curtis) — Dataset 1",
+       x = paste0("PCoA1 (", vars_ds1[1], "%)"),
+       y = paste0("PCoA2 (", vars_ds1[2], "%)"),
+       color = "Group")
+
+p_beta2 <- plot_ordination(Dataset_2_rel, ord2, color = "case_control") +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "PCoA (Bray-Curtis) — Dataset 2",
+       x = paste0("PCoA1 (", vars_ds2[1], "%)"),
+       y = paste0("PCoA2 (", vars_ds2[2], "%)"),
+       color = "Group")
+
+# Side by side
+print(p_beta1)
+print(p_beta2)
+
+
+```
+```{r}
+
+# extract the bray-curtis distance matrix already computed inside ord1/ord2
+# no need to recompute - phyloseq stored it
+bc_dist1<-phyloseq::distance(Dataset_1_rel,method="bray")
+bc_dist2<-phyloseq::distance(Dataset_2_rel,method="bray")
+
+#extract grouping variable
+group1<-sample_data(Dataset_1_rel)$case_control
+group2<-sample_data(Dataset_2_rel)$case_control
+```
+
+
+
+```{r, betadisper - check PERMANOVA assumption}
+#betadisper creates an R object with multiple slots
+
+#bd1$vectors → a matrix of PCoA coordinates (rows = samples, columns = PCoA axes)
+#bd1$group → the vector of group labels (Case/Control) for each sample
+
+
+# test whether group dispersions are equal
+#Takes your Bray-Curtis distance matrix and the group labels (Case/Control). Calculates the distance of each sample from its group #centroid
+bd1 <- betadisper(bc_dist1, group1)
+bd2 <- betadisper(bc_dist2, group2)
+
+print(bd1)
+print(bd2)
+
+#PLOTTING THE BETADISPER
+#extract coordinates from betadisper object
+
+
+
+
+#are the average dispersions significantly different between Case and Control? Uses permutations, same logic as PERMANOVA.
+# p > 0.05 = dispersions are equal = PERMANOVA result is trustworthy
+permutest(bd1)
+permutest(bd2)
+
+```
+Average distance to median:
+
+Case = 0.5719
+Control = 0.5472
+
+This is the actual dispersion measurement: the mean distance of each sample from its group's centroid in PCoA space. Cases are slightly more spread out than Controls (0.57 vs 0.55).
+The difference looks tiny  only 0.025 but with 333 samples, even small differences become statistically detectable. That is why our permutest(bd1) gave p = 0.005. The biological effect is small, but real.
+
+
+
+No. of Positive Eigenvalues: 177
+No. of Negative Eigenvalues: 155
+
+ Bray-Curtis is not a true Euclidean distance — it is semi-metric. When you do PCoA on it, you can get negative eigenvalues, which is  (negative variance does not exist in real space).
+betadisper reports both counts so you know how "non-Euclidean" our distance matrix is. With 155/332 negative eigenvalues, our matrix has substantial non-Euclidean structure.
+
+This is another reason Aitchison distance (=Euclidean on CLR) is methodologically cleaner. Aitchison gives you only positive eigenvalues — no negative weirdness. When you run PERMDISP on Aitchison distance later, you will see this difference.
+
+FROM THE eigenvalues we see that non axis carries the signal
+
+
+
+
+there is not separation 
+
+
+```{r, PERMANOVA bray-curtis}
+library(vegan)
+
+
+#PERMANOVA---999 permutations is the standard
+set.seed(42)
+perm1<-adonis2(bc_dist1~group1,permutations = 999)
+perm2<-adonis2(bc_dist2~group2,permutations = 999)
+               
+cat("=== Dataset 1 ===\n")
+print(perm1)
+
+cat("\n=== Dataset 2 ===\n")
+print(perm2)
+```
+PERMANOVA has an assumption: the variance (spread) within each group must be similar. If Cases are much more spread out than Controls in your PCoA, PERMANOVA can give a significant p-value not because the groups are in different locations, but because one group is simply more dispersed. The test for this is called betadisper.
+
+#adonis2 ITS partitioning the total variance in my distance matrix into
+-how much is explained by group (case and control)
+-how much is unexplained->the residual row
+
+in the sumofsquares the residual is the variance not explained by p
+
+R² = 0.00918 = 0.92%
+This is the most important number. PD status explains 0.92% of total microbiome variance. Everything else — diet, age, geography, individual variation — explains the remaining 99.08%.
+
+F = 3.07
+The ratio of explained to unexplained variance, scaled by degrees of freedom.  Higher = stronger group separation relative to within-group scatter.
+
+
+in dataset2 ->
+R² = 0.57% → even smaller effect in Dataset 2
+p = 0.003 → still significant
+F = 2.88 → slightly weaker signal than Dataset 1
+
+in the dataset2 we have more imbalanced groups that can affect F slightly 
+
+
+PERMANOVA detected significant compositional differences between PD and Control samples in both datasets (Dataset 1: R² = 0.92%, p = 0.001; Dataset 2: R² = 0.57%, p = 0.003), with effect sizes consistent with the cross-study meta-analytic estimate of R² ≤ 1% reported by Romano et al. 2025. PERMDISP analysis revealed significant heterogeneity of dispersion in both datasets (Dataset 1: p = 0.005; Dataset 2: p = 0.001), indicating that PD samples exhibit greater compositional variability than Controls. This is biologically consistent with the heterogeneous nature of PD-associated dysbiosis, where disease state, medication, and gastrointestinal symptoms produce diverse microbial profiles. The small but reproducible PERMANOVA signal supports the existence of PD-associated compositional shifts, while the PERMDISP finding motivates supervised machine learning approaches that can leverage individual-level patterns rather than relying on group centroid separation
+
+Comprehensive confounder adjustment as performed in the original Wallen et al. study was not possible due to limited public metadata availability 
+
+```{r ,pca on aitchison distance}
+#WE JUST USED PCOA WITH DIFFERENCE DISTANCE
+#(Aitchison = Euclidean distance on CLR-transformed data)
+library(vegan)
+# Aitchison = Euclidean distance on CLR-transformed data
+#  phyloseq stores taxa as rows by default → must transpose so rows = samples
+# vegdist() computes distances between rows, so rows MUST be samples
+euclidean_dist_1<-vegan::vegdist(t(otu_table(Dataset1_clr)),method="euclidean")
+
+
+euclidean_dist_2<-vegan::vegdist(t(otu_table(Dataset2_clr)),method="euclidean")
+
+
+#pca
+
+# Aitchison distance computed in previous chunk: aitch_dist_1, aitch_dist_2
+
+# PCoA on Aitchison distance (= PCA on CLR data, mathematically identical)
+aitch_pcoa_1 <- ordinate(Dataset1_clr, method = "PCoA", distance = euclidean_dist_1)
+aitch_pcoa_2 <- ordinate(Dataset2_clr, method = "PCoA", distance = euclidean_dist_2)
+
+
+
+
+library(ggplot2)
+library(patchwork)
+
+# Variance explained by first 2 axes (for axis labels)
+vars_aitc_1 <- round(aitch_pcoa_1$values$Relative_eig[1:2] * 100, 2)
+vars_aitc_2 <- round(aitch_pcoa_2$values$Relative_eig[1:2] * 100, 2)
+
+# Plot Dataset 1
+p_aitc_beta1 <- plot_ordination(Dataset1_filtered, aitch_pcoa_1, color = "case_control") +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "PCoA (Aitchison) — Dataset 1",
+       x = paste0("PCoA1 (", vars_aitc_1[1], "%)"),
+       y = paste0("PCoA2 (", vars_aitc_1[2], "%)"),
+       color = "Group")
+
+# Plot Dataset 2
+p_aitc_beta2 <- plot_ordination(Dataset2_filtered, aitch_pcoa_2, color = "case_control") +
+  geom_point(size = 2, alpha = 0.7) +
+  stat_ellipse(level = 0.95, linetype = "dashed") +
+  scale_color_manual(values = c("Case" = "#E74C3C", "Control" = "#3498DB")) +
+  theme_minimal(base_size = 13) +
+  labs(title = "PCoA (Aitchison) — Dataset 2",
+       x = paste0("PCoA1 (", vars_aitc_2[1], "%)"),
+       y = paste0("PCoA2 (", vars_aitc_2[2], "%)"),
+       color = "Group")
+
+# Side by side using patchwork
+p_aitc_beta1 + p_aitc_beta2
+
+
+```
+
+
+
+ANCOM-BC → takes raw counts (does its own internal transformation)
+Wilcoxon on CLR → takes CLR values directly (it's just a rank test, doesn't care about sign)
+DESeq2 → takes raw counts (negative binomial model, breaks on negatives)
+
+```{r,DA}
+
+
+
+
+
+
 
 
 
